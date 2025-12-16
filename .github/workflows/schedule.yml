@@ -1,4 +1,4 @@
-name: Data Crawler
+name: Daily Investment Data Crawler
 
 on:
   schedule:
@@ -22,17 +22,22 @@ jobs:
           python-version: '3.9'
 
       - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      # [핵심] 파일 2개를 차례대로 실행합니다!
+      - name: Run crawler scripts
         run: |
-          pip install -r requirements.txt
+          python main.py
+          python krx_ranking.py
 
-      - name: Run crawler code
-        run: python main.py
-
-      # [중요] 여기 파일명이 csv로 바뀌었습니다!
+      # 결과 파일 2개를 모두 저장소에 올립니다.
       - name: Commit and Push results
         run: |
           git config --global user.name "GitHub Actions Bot"
           git config --global user.email "actions@github.com"
-          git add dataset.csv
-          git commit -m "Auto-update: dataset.csv" || echo "No changes to commit"
+          
+          # 파일 2개 다 add
+          git add dataset.csv krx_ranking.csv
+          
+          git commit -m "Update daily data" || echo "No changes to commit"
           git push
