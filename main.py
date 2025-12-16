@@ -95,14 +95,40 @@ def setup_driver(headless=True):
     return driver
 
 def save_to_csv(data):
-    """CSV에 데이터 추가 저장"""
+    """중복 방지 기능이 추가된 CSV 저장"""
     try:
-        # a 모드(append)로 열어서 뒤에 이어 붙이기
-        with open(CSV_FILE, 'a', newline='', encoding='utf-8-sig') as f:
-            writer = csv.writer(f)
-            for row in data:
-                writer.writerow(row) # 튜플(날짜, 이름, 가격, 타입) 저장
-        return True
+        # 1. 기존 데이터 읽어서 중복 체크용 명부 만들기
+        existing_keys = set()
+        if os.path.exists(CSV_FILE):
+            with open(CSV_FILE, 'r', encoding='utf-8-sig') as f:
+                reader = csv.reader(f)
+                next(reader, None)  # 헤더 건너뛰기
+                for row in reader:
+                    if len(row) >= 2:
+                        # (날짜, 제품명)을 하나의 키로 묶어서 저장
+                        key = (row[0], row[1]) 
+                        existing_keys.add(key)
+
+        # 2. 중복되지 않은 새 데이터만 걸러내기
+        new_data = []
+        for row in data:
+            # row[0]=날짜, row[1]=제품명
+            current_key = (row[0], row[1])
+            if current_key not in existing_keys:
+                new_data.append(row)
+
+        # 3. 새 데이터가 있을 때만 저장
+        if new_data:
+            with open(CSV_FILE, 'a', newline='', encoding='utf-8-sig') as f:
+                writer = csv.writer(f)
+                for row in new_data:
+                    writer.writerow(row)
+            print(f"✅ {len(new_data)}건의 새로운 데이터 저장 완료! (중복 제외됨)")
+            return True
+        else:
+            print("💡 이미 저장된 데이터입니다. (저장 건너뜀)")
+            return True
+
     except PermissionError:
         print(f"\n❌ 파일 저장 실패! '{CSV_FILE}' 파일이 열려있습니다.")
         return False
