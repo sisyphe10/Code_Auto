@@ -38,10 +38,15 @@ TARGET_NAND_ITEMS = {
 }
 
 # yfinance 티커 목록 (지수는 별도 함수로 뺐음)
+# yfinance 티커 목록 (환율 추가됨)
+# yfinance 티커 목록
 YFINANCE_TICKERS = {
+    # --- 암호화폐 ---
     'Bitcoin': {'ticker': 'BTC-USD', 'type': 'CRYPTO'},
     'Ethereum': {'ticker': 'ETH-USD', 'type': 'CRYPTO'},
     'Binance Coin': {'ticker': 'BNB-USD', 'type': 'CRYPTO'},
+
+    # --- 원자재 ---
     'WTI Crude Oil': {'ticker': 'CL=F', 'type': 'COMMODITY'},
     'Brent Crude Oil': {'ticker': 'BZ=F', 'type': 'COMMODITY'},
     'Natural Gas': {'ticker': 'NG=F', 'type': 'COMMODITY'},
@@ -49,11 +54,21 @@ YFINANCE_TICKERS = {
     'Silver': {'ticker': 'SI=F', 'type': 'COMMODITY'},
     'Copper': {'ticker': 'HG=F', 'type': 'COMMODITY'},
     'Uranium ETF (URA)': {'ticker': 'URA', 'type': 'COMMODITY'},
+
+    # --- 지수 및 금리 ---
     'VIX Index': {'ticker': '^VIX', 'type': 'INDEX'},
+    'US 10 Year Treasury Yield': {'ticker': '^TNX', 'type': 'INTEREST_RATE'},
+
+    # --- 환율 (FX) ---
+    # 이제 모든 환율이 "1달러당 얼마" 기준으로 통일됩니다.
     'Dollar Index (DXY)': {'ticker': 'DX-Y.NYB', 'type': 'FX'},
-    'KRW/USD': {'ticker': 'KRW=X', 'type': 'FX'},
-    'JPY/USD': {'ticker': 'JPY=X', 'type': 'FX'},
-    'US 10 Year Treasury Yield': {'ticker': '^TNX', 'type': 'INTEREST_RATE'}
+    'KRW/USD': {'ticker': 'KRW=X', 'type': 'FX'},  # 원/달러 (예: 1450)
+    'JPY/USD': {'ticker': 'JPY=X', 'type': 'FX'},  # 엔/달러 (예: 150)
+    'CNY/USD': {'ticker': 'CNY=X', 'type': 'FX'},  # 위안/달러 (예: 7.2)
+    'TWD/USD': {'ticker': 'TWD=X', 'type': 'FX'},  # 대만달러/달러 (예: 32.5)
+
+    # [변경] EUR=X를 쓰면 '1달러당 유로'가 나옵니다.
+    'EUR/USD': {'ticker': 'EUR=X', 'type': 'FX'},  # 유로/달러 (예: 0.96)
 }
 
 
@@ -87,8 +102,9 @@ def setup_driver(headless=True):
 
 
 def save_to_csv(data):
-    """중복 방지 기능이 추가된 CSV 저장"""
+    """중복 방지 기능이 강화된 CSV 저장 (배치 내 중복까지 제거)"""
     try:
+        # 1. 파일에 이미 저장된 데이터 키 로드
         existing_keys = set()
         if os.path.exists(CSV_FILE):
             with open(CSV_FILE, 'r', encoding='utf-8-sig') as f:
@@ -100,10 +116,16 @@ def save_to_csv(data):
                         existing_keys.add(key)
 
         new_data = []
+        # [핵심 수정] 이번에 저장할 데이터끼리의 중복도 방지하기 위한 세트
+        current_batch_keys = set()
+
         for row in data:
             current_key = (row[0], row[1])
-            if current_key not in existing_keys:
+
+            # 1) 파일에 없고  AND  2) 지금 저장하려는 리스트에도 없을 때만 추가
+            if current_key not in existing_keys and current_key not in current_batch_keys:
                 new_data.append(row)
+                current_batch_keys.add(current_key)  # 방금 추가했음을 기록
 
         if new_data:
             with open(CSV_FILE, 'a', newline='', encoding='utf-8-sig') as f:
@@ -140,8 +162,11 @@ def get_last_scfi_date():
 # 1. [KRX] 한국 지수/시총/PER/PBR
 # ==========================================
 def crawl_krx_indices():
+    """
+    KOSPI, KOSDAQ, KOSPI200의 지수, 시가총액, PER, PBR, [추가] 순수 종목수 수집
+    """
     print(f"\n{'=' * 60}")
-    print(f"🇰🇷 KRX 지수/시총/PER/PBR 크롤링 시작")
+    print(f"🇰🇷 KRX 종합 데이터(종목수 포함) 크롤링 시작")
     print(f"{'=' * 60}")
 
     target_date = datetime.now()
@@ -164,14 +189,49 @@ def crawl_krx_indices():
     default_date = datetime.strptime(valid_date_str, "%Y%m%d").strftime("%Y-%m-%d")
     print(f"📅 조회 기준일: {default_date}")
 
-    targets = {"KOSPI": "1001", "KOSDAQ": "2001", "KOSPI 200": "1028"}
-    collected_data = []
+    targets = {"KOSPI": "KOSPI", "KOSDAQ": "KOSDAQ", "KOSPI 200": "KOSPI"}
+    # 주의: KOSPI 200은 지수지만 종목수는 KOSPI 시장 전체를 세는게 맞는지,
+    # 혹은 구성종목(200개)을 세는게 맞는지 애매하지만, 보통 시장 전체(KOSPI/KOSDAQ) 종목수를 봅니다.
+    # 여기서는 KOSPI, KOSDAQ 두 시장의 종목수만 집계하겠습니다.
 
+    collected_data = []
     start_lookup = (datetime.strptime(valid_date_str, "%Y%m%d") - timedelta(days=5)).strftime("%Y%m%d")
 
-    for name, ticker in targets.items():
+    # 1. [신규] 순수 상장 종목수 카운트 (KOSPI, KOSDAQ)
+    market_map = {"KOSPI": "KOSPI", "KOSDAQ": "KOSDAQ"}
+
+    for market_name, market_code in market_map.items():
         try:
-            # 1. 지수 & 시가총액
+            # 해당 시장의 전체 티커 가져오기 (ETF, ETN은 기본 제외됨)
+            tickers = stock.get_market_ticker_list(valid_date_str, market=market_code)
+
+            real_stock_count = 0
+            for ticker in tickers:
+                # 필터링 로직
+                # 1. 티커 끝자리 확인: 보통주는 '0'으로 끝남 (우선주 등 제외)
+                if ticker[-1] != '0':
+                    continue
+
+                # 2. 이름으로 스팩/리츠 거르기 (확실히 하기 위해 이름 조회)
+                name = stock.get_market_ticker_name(ticker)
+                if '스팩' in name or '리츠' in name:
+                    continue
+
+                real_stock_count += 1
+
+            collected_data.append((default_date, f"{market_name} 상장종목수", real_stock_count, 'INDEX_KR'))
+            print(f"✓ {market_name} 순수 종목수: {real_stock_count}개")
+
+        except Exception as e:
+            print(f"❌ {market_name} 종목수 집계 실패: {e}")
+
+    # 2. 기존 지수/시총/PER/PBR 로직
+    # (티커 매핑용)
+    index_targets = {"KOSPI": "1001", "KOSDAQ": "2001", "KOSPI 200": "1028"}
+
+    for name, ticker in index_targets.items():
+        try:
+            # A. 지수/시총
             df_price = stock.get_index_ohlcv_by_date(valid_date_str, valid_date_str, ticker)
             if not df_price.empty:
                 price = float(df_price['종가'].iloc[0])
@@ -182,7 +242,7 @@ def crawl_krx_indices():
                     market_cap = float(df_price['상장시가총액'].iloc[0])
                     collected_data.append((default_date, f"{name} 시가총액", market_cap, 'INDEX_KR'))
 
-            # 2. 펀더멘탈
+            # B. PER/PBR
             df_fund = stock.get_index_fundamental_by_date(start_lookup, valid_date_str, ticker)
             if not df_fund.empty:
                 if 'PER' in df_fund.columns:
@@ -201,10 +261,12 @@ def crawl_krx_indices():
                         collected_data.append((r_date, f"{name} PBR", val, 'INDEX_KR'))
 
         except Exception as e:
-            print(f"❌ {name} 오류: {e}")
+            print(f"❌ {name} 지수 데이터 오류: {e}")
 
     if collected_data:
         save_to_csv(collected_data)
+        return True
+    return False
 
 
 # ==========================================
@@ -270,8 +332,8 @@ def crawl_us_indices():
         save_to_csv(collected_data)
 
 
-# === 기존 크롤링 함수들 ===
 def crawl_dram_nand(data_type):
+    """DRAM 및 NAND 가격 크롤링 (중복 수집 방지 적용)"""
     print(f"\n📊 {data_type} 크롤링 시작")
     driver = None
     try:
@@ -283,20 +345,27 @@ def crawl_dram_nand(data_type):
         collected_data = []
         target_items = TARGET_DRAM_ITEMS if data_type == 'DRAM' else TARGET_NAND_ITEMS
 
+        # [핵심 수정] 이미 찾은 제품명을 기억하는 세트
+        found_items = set()
+
         tables = driver.find_elements(By.TAG_NAME, 'table')
         for table in tables:
             rows = table.find_elements(By.TAG_NAME, 'tr')
             for row in rows:
                 cells = row.find_elements(By.TAG_NAME, 'td')
+                if not cells: cells = row.find_elements(By.TAG_NAME, 'th')
                 if len(cells) < 2: continue
 
                 item_name = cells[0].text.strip()
-                if item_name in target_items:
+
+                # 타겟 제품이면서 + 아직 수집하지 않은 제품인 경우에만!
+                if item_name in target_items and item_name not in found_items:
                     try:
                         price = cells[1].text.strip()
                         if price and price.replace('.', '').replace(',', '').isdigit():
                             val = float(price.replace(',', ''))
                             collected_data.append((current_date, item_name, val, data_type))
+                            found_items.add(item_name)  # "나 이거 찾았음" 기록
                             print(f"✓ {item_name}: ${price}")
                     except:
                         pass
