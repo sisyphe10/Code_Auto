@@ -1,5 +1,4 @@
 schedule
 selenium
 webdriver-manager
-openpyxl
 yfinance
