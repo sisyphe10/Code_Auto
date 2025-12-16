@@ -2,3 +2,5 @@ schedule
 selenium
 webdriver-manager
 yfinance
+pykrx
+pandas
