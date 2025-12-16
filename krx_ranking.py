@@ -27,10 +27,12 @@ def save_to_csv(data_list):
         print(f"❌ 저장 실패: {e}")
 
 def find_latest_valid_data_date():
+    """가장 최근 영업일 찾기 (반환값: YYYYMMDD 문자열)"""
     target_date = datetime.now()
     for i in range(7):
         check_date = (target_date - timedelta(days=i)).strftime("%Y%m%d")
         try:
+            # 데이터 존재 여부 확인용 가조회
             df = stock.get_market_net_purchases_of_equities_by_ticker(check_date, check_date, "ALL", "개인")
             if not df.empty:
                 return check_date
@@ -41,6 +43,8 @@ def find_latest_valid_data_date():
 def get_top20_by_investor(target_date, investor_name):
     cap_df = stock.get_market_cap(target_date)
     inv_code = "기관합계" if investor_name == "기관" else investor_name
+    
+    # pykrx는 날짜를 'YYYYMMDD'로 받아야 작동하므로 그대로 사용
     df = stock.get_market_net_purchases_of_equities_by_ticker(target_date, target_date, "ALL", inv_code)
 
     col_candidates = [c for c in df.columns if "순매수" in c and ("대금" in c or "금액" in c)]
@@ -66,10 +70,14 @@ def main():
     print("🚀 KRX 순매수 상위 크롤링 시작")
     setup_csv()
     
+    # 여기서 받은 latest_date는 '20251215' 형식입니다 (API 조회용)
     latest_date = find_latest_valid_data_date()
 
     if latest_date:
-        print(f"### 분석 기준일: {latest_date} ###")
+        # [수정된 부분] 저장할 때는 '2025-12-15'로 예쁘게 변환합니다.
+        display_date = datetime.strptime(latest_date, "%Y%m%d").strftime("%Y-%m-%d")
+        
+        print(f"### 분석 기준일: {display_date} ###")
         investors = ["개인", "기관", "외국인", "연기금"]
         
         all_data = []
@@ -80,11 +88,10 @@ def main():
                 top_stocks = get_top20_by_investor(latest_date, inv)
                 if not top_stocks.empty:
                     for idx, row in top_stocks.iterrows():
-                        # CSV 저장용 리스트 생성
                         save_row = [
-                            latest_date,
+                            display_date,  # <-- 수정된 날짜 형식 사용
                             inv,
-                            idx + 1, # 순위
+                            idx + 1,
                             row['종목명'],
                             row['시가총액'],
                             row['순매수수량'],
