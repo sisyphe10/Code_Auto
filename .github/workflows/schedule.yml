@@ -1,4 +1,4 @@
-name: Daily Investment Data Crawler
+name: main, krx_ranking
 
 on:
   schedule:
