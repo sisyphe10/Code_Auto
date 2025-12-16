@@ -37,14 +37,11 @@ TARGET_NAND_ITEMS = {
     'MLC 32Gb 4GBx8': 'MLC 32Gb 4GBx8'
 }
 
-# yfinance 티커 목록
+# yfinance 티커 목록 (지수는 별도 함수로 뺐음)
 YFINANCE_TICKERS = {
     'Bitcoin': {'ticker': 'BTC-USD', 'type': 'CRYPTO'},
     'Ethereum': {'ticker': 'ETH-USD', 'type': 'CRYPTO'},
     'Binance Coin': {'ticker': 'BNB-USD', 'type': 'CRYPTO'},
-    'Ripple': {'ticker': 'XRP-USD', 'type': 'CRYPTO'},
-    'Solana': {'ticker': 'SOL-USD', 'type': 'CRYPTO'},
-    'Dogecoin': {'ticker': 'DOGE-USD', 'type': 'CRYPTO'},
     'WTI Crude Oil': {'ticker': 'CL=F', 'type': 'COMMODITY'},
     'Brent Crude Oil': {'ticker': 'BZ=F', 'type': 'COMMODITY'},
     'Natural Gas': {'ticker': 'NG=F', 'type': 'COMMODITY'},
@@ -52,17 +49,11 @@ YFINANCE_TICKERS = {
     'Silver': {'ticker': 'SI=F', 'type': 'COMMODITY'},
     'Copper': {'ticker': 'HG=F', 'type': 'COMMODITY'},
     'Uranium ETF (URA)': {'ticker': 'URA', 'type': 'COMMODITY'},
-    'Wheat Futures': {'ticker': 'ZW=F', 'type': 'COMMODITY'},
     'VIX Index': {'ticker': '^VIX', 'type': 'INDEX'},
     'Dollar Index (DXY)': {'ticker': 'DX-Y.NYB', 'type': 'FX'},
     'KRW/USD': {'ticker': 'KRW=X', 'type': 'FX'},
-    'CNY/USD': {'ticker': 'CNY=X', 'type': 'FX'},
-    'EUR/USD': {'ticker': 'EURUSD=X', 'type': 'FX'},
-    'TWD/USD': {'ticker': 'TWD=X', 'type': 'FX'},
     'JPY/USD': {'ticker': 'JPY=X', 'type': 'FX'},
-    'US 2 Year Treasury Yield': {'ticker': '^IRX', 'type': 'INTEREST_RATE'},
-    'US 10 Year Treasury Yield': {'ticker': '^TNX', 'type': 'INTEREST_RATE'},
-    'US 30 Year Treasury Yield': {'ticker': '^TYX', 'type': 'INTEREST_RATE'}
+    'US 10 Year Treasury Yield': {'ticker': '^TNX', 'type': 'INTEREST_RATE'}
 }
 
 
@@ -98,7 +89,6 @@ def setup_driver(headless=True):
 def save_to_csv(data):
     """중복 방지 기능이 추가된 CSV 저장"""
     try:
-        # 1. 기존 데이터 읽어서 중복 키(날짜, 제품명) 저장
         existing_keys = set()
         if os.path.exists(CSV_FILE):
             with open(CSV_FILE, 'r', encoding='utf-8-sig') as f:
@@ -106,18 +96,15 @@ def save_to_csv(data):
                 next(reader, None)
                 for row in reader:
                     if len(row) >= 2:
-                        # (날짜, 제품명) 조합이 같으면 중복으로 간주
                         key = (row[0], row[1])
                         existing_keys.add(key)
 
-        # 2. 중복되지 않은 새 데이터만 선별
         new_data = []
         for row in data:
             current_key = (row[0], row[1])
             if current_key not in existing_keys:
                 new_data.append(row)
 
-        # 3. 저장
         if new_data:
             with open(CSV_FILE, 'a', newline='', encoding='utf-8-sig') as f:
                 writer = csv.writer(f)
@@ -149,16 +136,14 @@ def get_last_scfi_date():
         return None
 
 
-# === [KRX] 지수 및 펀더멘탈 크롤링 ===
+# ==========================================
+# 1. [KRX] 한국 지수/시총/PER/PBR
+# ==========================================
 def crawl_krx_indices():
-    """
-    KOSPI, KOSDAQ, KOSPI200의 지수, PER, PBR, [추가] 시가총액 수집
-    """
     print(f"\n{'=' * 60}")
-    print(f"🇰🇷 KRX 데이터(지수/시총/PER/PBR) 크롤링 시작")
+    print(f"🇰🇷 KRX 지수/시총/PER/PBR 크롤링 시작")
     print(f"{'=' * 60}")
 
-    # 1. 기준일 설정
     target_date = datetime.now()
     valid_date_str = None
 
@@ -186,23 +171,18 @@ def crawl_krx_indices():
 
     for name, ticker in targets.items():
         try:
-            # --- A. 지수 및 시가총액 (OHLCV API) ---
+            # 1. 지수 & 시가총액
             df_price = stock.get_index_ohlcv_by_date(valid_date_str, valid_date_str, ticker)
             if not df_price.empty:
-                # 1. 지수 (종가)
                 price = float(df_price['종가'].iloc[0])
                 collected_data.append((default_date, name, price, 'INDEX_KR'))
                 print(f"✓ {name}: {price:,.2f}")
 
-                # 2. [추가됨] 상장시가총액 (백만원 단위 -> 원 단위 보정 or 그대로 저장)
-                # pykrx의 상장시가총액은 보통 '원' 단위로 나옵니다.
                 if '상장시가총액' in df_price.columns:
                     market_cap = float(df_price['상장시가총액'].iloc[0])
-                    # 항목명: KOSPI 시가총액
                     collected_data.append((default_date, f"{name} 시가총액", market_cap, 'INDEX_KR'))
-                    print(f"  -> 시가총액: {market_cap:,.0f}")
 
-            # --- B. 펀더멘탈 (PER, PBR) ---
+            # 2. 펀더멘탈
             df_fund = stock.get_index_fundamental_by_date(start_lookup, valid_date_str, ticker)
             if not df_fund.empty:
                 if 'PER' in df_fund.columns:
@@ -219,15 +199,75 @@ def crawl_krx_indices():
                         val = float(valid.iloc[-1]['PBR'])
                         r_date = valid.iloc[-1].name.strftime("%Y-%m-%d")
                         collected_data.append((r_date, f"{name} PBR", val, 'INDEX_KR'))
-                        print(f"  -> PBR: {val} ({r_date})")
 
         except Exception as e:
             print(f"❌ {name} 오류: {e}")
 
     if collected_data:
         save_to_csv(collected_data)
-        return True
-    return False
+
+
+# ==========================================
+# 2. [US] 미국 지수/PER/PBR (ETF 대용)
+# ==========================================
+def crawl_us_indices():
+    """미국 지수는 Index로 가격을, 대형 ETF로 펀더멘탈(PER/PBR)을 수집합니다."""
+    print(f"\n{'=' * 60}")
+    print(f"🇺🇸 미국 지수/PER/PBR 크롤링 시작 (yfinance)")
+    print(f"{'=' * 60}")
+
+    current_date = datetime.now().strftime('%Y-%m-%d')
+
+    # 지수 티커(가격용) / ETF 티커(펀더멘탈용) 매핑
+    targets = {
+        "S&P 500": {"idx": "^GSPC", "etf": "SPY"},
+        "NASDAQ": {"idx": "^IXIC", "etf": "QQQ"},  # NASDAQ 100 기준
+        "RUSSELL 2000": {"idx": "^RUT", "etf": "IWM"}
+    }
+
+    collected_data = []
+
+    for name, tickers in targets.items():
+        try:
+            # 1. 지수 가격 (Index Ticker)
+            idx_ticker = yf.Ticker(tickers['idx'])
+            hist = idx_ticker.history(period="1d")
+
+            if not hist.empty:
+                price = float(hist['Close'].iloc[0])
+                d_date = hist.index[0].strftime('%Y-%m-%d')  # 실제 장 마감일
+                collected_data.append((d_date, name, price, 'INDEX_US'))
+                print(f"✓ {name}: {price:,.2f}")
+
+                # 2. 펀더멘탈 (ETF Ticker)
+                # 지수 자체는 PER/PBR 데이터가 없는 경우가 많아 ETF를 Proxy로 사용
+                etf_ticker = yf.Ticker(tickers['etf'])
+                info = etf_ticker.info
+
+                # PER
+                if 'trailingPE' in info and info['trailingPE']:
+                    pe = info['trailingPE']
+                    collected_data.append((d_date, f"{name} PER", pe, 'INDEX_US'))
+                    print(f"  -> PER: {pe:.2f}")
+
+                # PBR
+                if 'priceToBook' in info and info['priceToBook']:
+                    pbr = info['priceToBook']
+                    collected_data.append((d_date, f"{name} PBR", pbr, 'INDEX_US'))
+                    print(f"  -> PBR: {pbr:.2f}")
+
+                # 시가총액 (주의: ETF 시총이 아니라 전체 지수 시총은 무료 API로 얻기 매우 힘듭니다)
+                # yfinance Index ticker의 info에 marketCap이 있는 경우만 수집
+                # (보통 S&P500 같은 지수는 marketCap이 None으로 나옵니다)
+                if 'marketCap' in idx_ticker.info and idx_ticker.info['marketCap']:
+                    mkt_cap = idx_ticker.info['marketCap']
+                    collected_data.append((d_date, f"{name} 시가총액", mkt_cap, 'INDEX_US'))
+
+        except Exception as e:
+            print(f"❌ {name} 오류: {e}")
+
+    if collected_data:
+        save_to_csv(collected_data)
 
 
 # === 기존 크롤링 함수들 ===
@@ -248,7 +288,6 @@ def crawl_dram_nand(data_type):
             rows = table.find_elements(By.TAG_NAME, 'tr')
             for row in rows:
                 cells = row.find_elements(By.TAG_NAME, 'td')
-                if not cells: cells = row.find_elements(By.TAG_NAME, 'th')
                 if len(cells) < 2: continue
 
                 item_name = cells[0].text.strip()
@@ -332,7 +371,11 @@ def main():
     crawl_dram_nand('NAND')
     crawl_scfi_index()
     crawl_yfinance_data()
-    crawl_krx_indices()  # KRX 추가
+
+    # 한국 지수
+    crawl_krx_indices()
+    # 미국 지수
+    crawl_us_indices()
 
     print(f"\n📁 결과 파일: {CSV_FILE}")
 
