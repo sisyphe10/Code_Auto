@@ -85,9 +85,9 @@ def get_top20_by_investor(target_date, investor_name):
 
     result = pd.DataFrame()
     result['종목명'] = top20['종목명']
-    result['시가총액'] = (top20['시가총액'] / 100000000).apply(lambda x: f"{x:,.0f}억원")
+    result['시가총액'] = (top20['시가총액'] / 100000000).apply(lambda x: f"{x:,.0f}")
     result['순매수수량'] = top20[qty_col].apply(lambda x: f"{x:,}")
-    result['순매수대금'] = (top20[target_col] / 100000000).apply(lambda x: f"{x:,.0f}억원")
+    result['순매수대금'] = (top20[target_col] / 100000000).apply(lambda x: f"{x:,.0f}")
     result['비율(%)'] = top20['비율(%)'].apply(lambda x: f"{x:.2f}%")
 
     return result.reset_index(drop=True)
