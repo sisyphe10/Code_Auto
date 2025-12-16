@@ -16,13 +16,39 @@ def setup_csv():
             writer.writerow(['날짜', '투자자', '순위', '종목명', '시가총액', '순매수수량', '순매수대금', '비율(%)'])
 
 def save_to_csv(data_list):
-    """데이터 리스트를 CSV에 추가"""
+    """중복 방지 기능이 추가된 CSV 저장"""
     try:
-        with open(CSV_FILE, 'a', newline='', encoding='utf-8-sig') as f:
-            writer = csv.writer(f)
-            for row in data_list:
-                writer.writerow(row)
-        print(f"✅ 데이터 {len(data_list)}건 저장 완료")
+        # 1. 기존 데이터 확인
+        existing_keys = set()
+        if os.path.exists(CSV_FILE):
+            with open(CSV_FILE, 'r', encoding='utf-8-sig') as f:
+                reader = csv.reader(f)
+                next(reader, None)
+                for row in reader:
+                    if len(row) >= 4:
+                        # (날짜, 투자자, 종목명) 조합으로 중복 체크
+                        # row[0]:날짜, row[1]:투자자, row[3]:종목명
+                        key = (row[0], row[1], row[3])
+                        existing_keys.add(key)
+
+        # 2. 중복 없는 데이터만 선별
+        new_records = []
+        for row in data_list:
+            # row[0]:날짜, row[1]:투자자, row[3]:종목명
+            current_key = (row[0], row[1], row[3])
+            if current_key not in existing_keys:
+                new_records.append(row)
+
+        # 3. 저장
+        if new_records:
+            with open(CSV_FILE, 'a', newline='', encoding='utf-8-sig') as f:
+                writer = csv.writer(f)
+                for row in new_records:
+                    writer.writerow(row)
+            print(f"✅ 데이터 {len(new_records)}건 저장 완료 (중복 제외)")
+        else:
+            print("💡 이미 모든 데이터가 저장되어 있습니다.")
+
     except Exception as e:
         print(f"❌ 저장 실패: {e}")
 
