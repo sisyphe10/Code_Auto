@@ -12,7 +12,7 @@ import os
 import csv
 import yfinance as yf
 import warnings
-import FinanceDataReader as fdr  # [교체] pykrx 제거 및 fdr 추가
+import FinanceDataReader as fdr  # [변경] pykrx 대신 fdr 사용
 import pandas as pd
 
 # 경고 메시지 무시
@@ -150,39 +150,33 @@ def get_last_scfi_date():
 
 
 # ==========================================
-# 1. [KRX] 한국 지수/시총/종목수 (fdr로 교체)
+# 1. [KRX] 한국 지수/시총/종목수 (FinanceDataReader 사용)
 # ==========================================
 def crawl_krx_indices():
-    """
-    FinanceDataReader를 사용하여 KOSPI, KOSDAQ의 지수, 시가총액, 종목수를 수집.
-    (주의: fdr은 지수별 PER/PBR 데이터를 제공하지 않아 해당 부분은 삭제됨)
-    """
+    """FinanceDataReader를 사용하여 KOSPI, KOSDAQ의 지수, 시가총액, 종목수를 수집"""
     print(f"\n{'=' * 60}")
     print(f"🇰🇷 KRX 종합 데이터(fdr) 크롤링 시작")
     print(f"{'=' * 60}")
 
     collected_data = []
-    # fdr은 별도 날짜 지정 없이 호출 시 최신 데이터 스냅샷을 가져옵니다.
     today_str = datetime.now().strftime("%Y-%m-%d")
 
     try:
-        # --- 1. 종목수 및 시가총액 계산 ---
-        # KRX 전체 상장 종목 리스트 가져오기
+        # 1. 전종목 리스트 가져오기
         df_master = fdr.StockListing('KRX')
         
-        # 컬럼명 유연화 (MarCap, MarketCap 등 버전별 차이 대응)
+        # 컬럼명 표준화
         col_map = {'MarketCap': 'Marcap', 'MarCap': 'Marcap', 'Name': 'Name', 'Code': 'Code', 'Market': 'Market'}
         df_master = df_master.rename(columns={k: v for k, v in col_map.items() if k in df_master.columns})
 
+        # 2. 시장별 분석
         target_markets = ['KOSPI', 'KOSDAQ']
         
         for market in target_markets:
             try:
-                # 해당 시장만 필터링
                 mkt_df = df_master[df_master['Market'] == market]
                 
-                # A. 순수 상장 종목수 필터링 (기존 로직 유지: 스팩/리츠 제외, 보통주만)
-                # 보통주: 종목코드가 '0'으로 끝남
+                # A. 순수 상장 종목수
                 real_stocks = mkt_df[
                     (mkt_df['Code'].str.endswith('0')) & 
                     (~mkt_df['Name'].str.contains('스팩')) & 
@@ -192,37 +186,31 @@ def crawl_krx_indices():
                 collected_data.append((today_str, f"{market} 상장종목수", count, 'INDEX_KR'))
                 print(f"✓ {market} 순수 종목수: {count}개")
 
-                # B. 시가총액 합계 (단위: 원)
+                # B. 시가총액 합계
                 if 'Marcap' in mkt_df.columns:
                     total_cap = mkt_df['Marcap'].sum()
                     collected_data.append((today_str, f"{market} 시가총액", float(total_cap), 'INDEX_KR'))
                     print(f"✓ {market} 시가총액 합계 집계 완료")
 
             except Exception as e:
-                print(f"⚠️ {market} 분석 실패: {e}")
+                print(f"⚠️ {market} 종목 분석 실패: {e}")
 
-        # --- 2. 지수 가격 (Index Price) ---
-        # 심볼 매핑: KOSPI -> KS11, KOSDAQ -> KQ11, KOSPI 200 -> KS200
-        index_map = {
-            'KOSPI': 'KS11',
-            'KOSDAQ': 'KQ11',
-            'KOSPI 200': 'KS200'
-        }
+        # 3. 지수 가격
+        index_map = {'KOSPI': 'KS11', 'KOSDAQ': 'KQ11', 'KOSPI 200': 'KS200'}
 
         for name, symbol in index_map.items():
             try:
-                # 오늘 기준 최근 데이터 조회 (주말/휴일 고려하여 최근 5일치 중 마지막 값)
-                start_date = (datetime.now() - timedelta(days=5)).strftime("%Y-%m-%d")
-                df_idx = fdr.DataReader(symbol, start_date)
+                df_idx = fdr.DataReader(symbol, today_str, today_str)
+                if df_idx.empty:
+                    prev_date = (datetime.now() - timedelta(days=5)).strftime("%Y-%m-%d")
+                    df_idx = fdr.DataReader(symbol, prev_date)
                 
                 if not df_idx.empty:
                     last_row = df_idx.iloc[-1]
                     price = float(last_row['Close'])
-                    # 실제 데이터 날짜
                     date_val = last_row.name.strftime("%Y-%m-%d")
-                    
                     collected_data.append((date_val, name, price, 'INDEX_KR'))
-                    print(f"✓ {name} 지수: {price:,.2f} ({date_val})")
+                    print(f"✓ {name} 지수: {price:,.2f}")
             except Exception as e:
                 print(f"⚠️ {name} 지수 조회 실패: {e}")
 
@@ -234,10 +222,10 @@ def crawl_krx_indices():
 
 
 # ==========================================
-# 2. [US] 미국 지수/PER/PBR (ETF 대용)
+# 2. [US] 미국 지수/PER/PBR (yfinance)
 # ==========================================
 def crawl_us_indices():
-    """미국 지수는 Index로 가격을, 대형 ETF로 펀더멘탈(PER/PBR)을 수집합니다."""
+    """미국 지수 및 PER/PBR 수집"""
     print(f"\n{'=' * 60}")
     print(f"🇺🇸 미국 지수/PER/PBR 크롤링 시작 (yfinance)")
     print(f"{'=' * 60}")
@@ -250,4 +238,159 @@ def crawl_us_indices():
         "RUSSELL 2000": {"idx": "^RUT", "etf": "IWM"}
     }
 
-    for name, tickers in
+    for name, tickers in targets.items():
+        try:
+            # 1. 지수 가격
+            idx_ticker = yf.Ticker(tickers['idx'])
+            hist = idx_ticker.history(period="1d")
+
+            if not hist.empty:
+                price = float(hist['Close'].iloc[0])
+                d_date = hist.index[0].strftime('%Y-%m-%d')
+                collected_data.append((d_date, name, price, 'INDEX_US'))
+                print(f"✓ {name}: {price:,.2f}")
+
+                # 2. 펀더멘탈 (ETF 사용)
+                etf_ticker = yf.Ticker(tickers['etf'])
+                info = etf_ticker.info
+
+                if 'trailingPE' in info and info['trailingPE']:
+                    pe = info['trailingPE']
+                    collected_data.append((d_date, f"{name} PER", pe, 'INDEX_US'))
+
+                if 'priceToBook' in info and info['priceToBook']:
+                    pbr = info['priceToBook']
+                    collected_data.append((d_date, f"{name} PBR", pbr, 'INDEX_US'))
+
+        except Exception as e:
+            print(f"❌ {name} 오류: {e}")
+
+    if collected_data:
+        save_to_csv(collected_data)
+
+
+# ==========================================
+# 3. [DRAM/NAND] 반도체 가격
+# ==========================================
+def crawl_dram_nand(data_type):
+    """DRAM 및 NAND 가격 크롤링"""
+    print(f"\n📊 {data_type} 크롤링 시작")
+    driver = None
+    try:
+        driver = setup_driver()
+        driver.get(f'https://www.dramexchange.com/#{data_type.lower()}')
+        WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, 'table')))
+
+        current_date = datetime.now().strftime('%Y-%m-%d')
+        collected_data = []
+        target_items = TARGET_DRAM_ITEMS if data_type == 'DRAM' else TARGET_NAND_ITEMS
+        found_items = set()
+
+        tables = driver.find_elements(By.TAG_NAME, 'table')
+        for table in tables:
+            rows = table.find_elements(By.TAG_NAME, 'tr')
+            for row in rows:
+                cells = row.find_elements(By.TAG_NAME, 'td')
+                if not cells: cells = row.find_elements(By.TAG_NAME, 'th')
+                if len(cells) < 2: continue
+
+                item_name = cells[0].text.strip()
+                if item_name in target_items and item_name not in found_items:
+                    try:
+                        price = cells[1].text.strip()
+                        if price and price.replace('.', '').replace(',', '').isdigit():
+                            val = float(price.replace(',', ''))
+                            collected_data.append((current_date, item_name, val, data_type))
+                            found_items.add(item_name)
+                            print(f"✓ {item_name}: ${price}")
+                    except:
+                        pass
+
+        if collected_data:
+            save_to_csv(collected_data)
+        else:
+            print(f"⚠️ {data_type} 데이터 없음")
+
+    except Exception as e:
+        print(f"❌ {data_type} 오류: {e}")
+    finally:
+        if driver: driver.quit()
+
+
+# ==========================================
+# 4. [SCFI] 해상운임지수
+# ==========================================
+def crawl_scfi_index():
+    print(f"\n🚢 SCFI 크롤링 시작")
+    driver = None
+    try:
+        driver = setup_driver()
+        driver.get('https://en.sse.net.cn/indices/scfinew.jsp')
+        WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.ID, 'currdate')))
+
+        scfi_date = driver.find_element(By.ID, 'currdate').text.strip()
+        scfi_value = None
+
+        tables = driver.find_elements(By.TAG_NAME, 'table')
+        for table in tables:
+            if 'Comprehensive Index' in table.text:
+                rows = table.find_elements(By.TAG_NAME, 'tr')
+                for row in rows:
+                    if 'Comprehensive Index' in row.text:
+                        idx4 = row.find_elements(By.CSS_SELECTOR, 'span.idx4')
+                        if idx4: scfi_value = idx4[0].text.strip()
+
+        if scfi_value and scfi_date:
+            if get_last_scfi_date() == scfi_date:
+                print(f"💡 SCFI 최신 상태 ({scfi_date})")
+            else:
+                save_to_csv([(scfi_date, 'SCFI Comprehensive Index', float(scfi_value), 'OCEAN_FREIGHT')])
+                print(f"✅ SCFI 저장: {scfi_value}")
+    except Exception as e:
+        print(f"❌ SCFI 오류: {e}")
+    finally:
+        if driver: driver.quit()
+
+
+# ==========================================
+# 5. [yfinance] 기타 자산
+# ==========================================
+def crawl_yfinance_data():
+    print(f"\n📈 yfinance 크롤링 시작")
+    current_date = datetime.now().strftime('%Y-%m-%d')
+    collected_data = []
+    for name, info in YFINANCE_TICKERS.items():
+        try:
+            t = yf.Ticker(info['ticker'])
+            h = t.history(period='1d')
+            if not h.empty:
+                price = float(h['Close'].iloc[0])
+                d = h.index[0].strftime('%Y-%m-%d') if info['type'] != 'CRYPTO' else current_date
+                collected_data.append((d, name, price, info['type']))
+                print(f"✓ {name}: {price:.2f}")
+        except:
+            print(f"⚠️ {name} 실패")
+
+    if collected_data: save_to_csv(collected_data)
+
+
+# ==========================================
+# Main Execution
+# ==========================================
+def main():
+    print("🚀 전체 크롤링 시작")
+    setup_csv()
+
+    # 순차적 실행
+    crawl_dram_nand('DRAM')
+    crawl_dram_nand('NAND')
+    crawl_scfi_index()
+    crawl_yfinance_data()
+    crawl_krx_indices()  # FinanceDataReader 버전
+    crawl_us_indices()
+
+    print(f"\n📁 결과 파일: {CSV_FILE}")
+
+
+if __name__ == "__main__":
+    main()
