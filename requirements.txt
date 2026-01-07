@@ -4,3 +4,6 @@ webdriver-manager
 yfinance
 finance-datareader
 pandas
+openpyxl
+requests
+lxml
