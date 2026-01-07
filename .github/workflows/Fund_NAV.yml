@@ -1,0 +1,42 @@
+name: Portfolio Calculation (Excel Update)
+
+on:
+  schedule:
+    # 매일 한국 시간 오후 6시 (UTC 09:00) 실행
+    - cron: '0 9 * * *'
+  workflow_dispatch: # 수동 실행 버튼
+
+permissions:
+  contents: write # 엑셀 파일 수정 및 저장 권한
+
+jobs:
+  calculate-portfolio:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    # [핵심 수정] 일일이 나열하지 않고, requirements.txt를 통해 설치
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Run calculation script
+      run: |
+        python portfolio.py
+
+    - name: Commit and Push changes
+      run: |
+        git config --global user.name "GitHub Action"
+        git config --global user.email "action@github.com"
+        git add LifeAM_WRAP_TS.xlsx
+        # 변경사항이 있을 때만 커밋 (에러 방지)
+        git commit -m "Update Portfolio Data [$(date)]" || exit 0
+        git push
